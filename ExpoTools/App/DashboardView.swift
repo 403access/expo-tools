@@ -204,6 +204,7 @@ struct ExpoCard: View {
     let tint = Palette.expo
 
     @State private var showStopConfirmation = false
+    @State private var isStopping = false
 
     var body: some View {
         PlatformCard(
@@ -242,42 +243,33 @@ struct ExpoCard: View {
                         QRCodeView(text: server.lanURL, size: 62)
                     }
 
-                    HStack(spacing: 6) {
-                        ActionButton(title: "Open", symbol: "safari", tint: tint) {
-                            Actions.openURL(server.localURL)
-                        }
-                        ActionButton(title: "Copy URL", symbol: "doc.on.doc", tint: tint) {
-                            Actions.copyToPasteboard(server.lanURL)
-                        }
-                        ActionButton(title: "Folder", symbol: "folder", tint: tint) {
-                            Actions.reveal(path: server.projectPath)
-                        }
+                    if showStopConfirmation {
+                        stopConfirmation(for: server)
+                    } else {
+                        HStack(spacing: 6) {
+                            ActionButton(title: "Open", symbol: "safari", tint: tint) {
+                                Actions.openURL(server.localURL)
+                            }
+                            ActionButton(title: "Copy URL", symbol: "doc.on.doc", tint: tint) {
+                                Actions.copyToPasteboard(server.lanURL)
+                            }
+                            ActionButton(title: "Folder", symbol: "folder", tint: tint) {
+                                Actions.reveal(path: server.projectPath)
+                            }
 
-                        Spacer(minLength: 0)
+                            Spacer(minLength: 0)
 
-                        IconButton(
-                            symbol: "stop.fill",
-                            tint: Palette.danger.opacity(0.8),
-                            help: "Stop Metro"
-                        ) {
-                            showStopConfirmation = true
+                            IconButton(
+                                symbol: "stop.fill",
+                                tint: Palette.danger.opacity(0.8),
+                                help: "Stop Metro"
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showStopConfirmation = true
+                                }
+                            }
                         }
                     }
-                }
-                .confirmationDialog(
-                    "Stop the Expo dev server?",
-                    isPresented: $showStopConfirmation,
-                    titleVisibility: .visible
-                ) {
-                    Button("Stop Metro (PID \(server.pid))", role: .destructive) {
-                        Actions.stop(pid: server.pid)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            store.refresh()
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Sends SIGINT to the detected Metro process.")
                 }
             } else {
                 EmptyState(
@@ -291,6 +283,74 @@ struct ExpoCard: View {
     }
 
     @EnvironmentObject private var store: MonitorStore
+
+    // MARK: - Stop confirmation
+
+    /// Inline confirmation. A system alert would take key focus, which closes
+    /// the `MenuBarExtra` panel before the destructive action could run.
+    @ViewBuilder
+    private func stopConfirmation(for server: ExpoServer) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Palette.warning)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Stop Metro?")
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+                Text("Sends SIGINT to PID \(server.pid)")
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+
+            Spacer(minLength: 4)
+
+            ActionButton(title: "Cancel", symbol: "xmark", tint: Color.white.opacity(0.6)) {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showStopConfirmation = false
+                }
+            }
+            .disabled(isStopping)
+
+            if isStopping {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .frame(width: 22, height: 22)
+            } else {
+                ActionButton(title: "Stop", symbol: "stop.fill", tint: Palette.danger) {
+                    stopMetro(server)
+                }
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Palette.danger.opacity(0.12))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Palette.danger.opacity(0.3), lineWidth: 0.7)
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func stopMetro(_ server: ExpoServer) {
+        guard !isStopping else { return }
+        isStopping = true
+        Actions.stop(pid: server.pid)
+
+        // Give Metro a moment to exit before re-scanning processes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            store.refresh()
+            isStopping = false
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showStopConfirmation = false
+            }
+        }
+    }
 }
 
 // MARK: - Xcode
